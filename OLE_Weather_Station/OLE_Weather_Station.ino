@@ -1,3 +1,7 @@
+// =========================
+// ESP32 Weather Station Code
+// =========================
+
 #include <WiFi.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -8,37 +12,37 @@
 #include <WebServer.h>
 
 // === Wi-Fi Credentials ===
-const char* ssid = "oleb5";
-const char* password = "0lesecond";
+const char* ssid = "realme";
+const char* password = "12345678";
 
 // === Custom I2C Pins ===
 #define SDA_PIN 16
 #define SCL_PIN 17
 
-// === OLED Setup ===
+// === OLED Display Setup ===
 Adafruit_SH1106G display = Adafruit_SH1106G(128, 64, &Wire);
 
-// === DHT22 Setup ===
+// === DHT22 Sensor Setup ===
 #define DHTPIN 15
 #define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
 
-// === MQ135 Setup ===
+// === MQ135 Gas Sensor Setup ===
 #define MQ135_PIN 34
-float Ro = 10.0;
+float Ro = 10.0;  // Initial assumed Ro
 
-// === BMP280 Setup ===
+// === BMP280 Sensor Setup ===
 Adafruit_BMP280 bmp;
 
-// === Web Server ===
+// === Web Server Instance ===
 WebServer server(80);
 
-// === Toggle Screen Variables ===
+// === OLED Toggle Display Settings ===
 unsigned long lastToggle = 0;
-const unsigned long toggleInterval = 10000;
+const unsigned long toggleInterval = 10000; // ms
 int screenNumber = 0;
 
-// === Function Declarations ===
+// === Function Prototypes ===
 float calibrateMQ135();
 float getResistanceMQ135();
 int calculateAQI(float co2_ppm);
@@ -48,15 +52,16 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  // I2C Init
+  // Initialize I2C with custom pins
   Wire.begin(SDA_PIN, SCL_PIN);
 
-  // OLED Init
+  // Initialize OLED
   if (!display.begin(0x3C, true)) {
     Serial.println("OLED not found");
     while (1);
   }
 
+  // Startup display
   display.clearDisplay();
   display.setTextSize(2);
   display.setTextColor(SH110X_WHITE);
@@ -67,10 +72,10 @@ void setup() {
   display.display();
   delay(2000);
 
-  // DHT22 Init
+  // Initialize DHT sensor
   dht.begin();
 
-  // BMP280 Init
+  // Initialize BMP280 sensor
   if (!bmp.begin(0x76)) {
     Serial.println("BMP280 not found");
     while (1);
@@ -87,27 +92,28 @@ void setup() {
   Serial.print("Calibrated Ro: ");
   Serial.println(Ro);
 
-  // Wi-Fi Init
+  // Connect to Wi-Fi
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-
   Serial.println("\nWiFi connected");
   Serial.println(WiFi.localIP());
 
-  // Web Server Routes
+  // Setup HTTP route
   server.on("/", []() {
     server.send(200, "text/html", generateHTML());
   });
+
   server.begin();
 }
 
 void loop() {
   server.handleClient();
 
+  // Sensor Readings
   float temperature = dht.readTemperature();
   float humidity = dht.readHumidity();
   float rs = getResistanceMQ135();
@@ -118,15 +124,17 @@ void loop() {
   float alcohol_ppm = pow(10, (-1.552 * log10(ratio) + 2.041));
 
   float pressure = bmp.readPressure() / 100.0F;
+  float altitude = 44330 * (1.0 - pow(pressure / 1013.25, 0.1903));
   float bmpTemp = bmp.readTemperature();
   int aqi = calculateAQI(co2_ppm);
 
+  // Toggle display screen
   if (millis() - lastToggle > toggleInterval) {
     screenNumber = 1 - screenNumber;
     lastToggle = millis();
   }
 
-  // OLED Display
+  // === OLED Display ===
   display.clearDisplay();
   display.setTextColor(SH110X_WHITE);
   display.setTextSize(1);
@@ -156,12 +164,15 @@ void loop() {
     display.print("Pressure: ");
     display.println(String(pressure, 1) + " KPa");
 
-    display.setCursor(0, 16);
+    display.setCursor(0, 12);
+    display.print("Altitude: ");
+    display.println(String(altitude, 1) + "m");
+
+    display.setCursor(0, 24);
     display.print("Temp(BMP): ");
     display.println(String(bmpTemp, 1) + "C");
 
-    display.setCursor(0, 40);
-    display.setTextSize(1.5);
+    display.setCursor(0, 36);
     display.print("AQI: ");
     display.print(aqi);
   }
@@ -170,7 +181,7 @@ void loop() {
   delay(100);
 }
 
-// === MQ135 Calibration ===
+// === Calibrate MQ135 ===
 float calibrateMQ135() {
   int val = 0;
   for (int i = 0; i < 100; i++) {
@@ -180,11 +191,11 @@ float calibrateMQ135() {
   val /= 100;
   float voltage = val * (3.3 / 4095.0);
   float Rs = ((3.3 - voltage) / voltage) * 10.0;
-  float Ro = Rs / 3.6;
+  float Ro = Rs / 3.6;  // Clean air ratio
   return Ro;
 }
 
-// === MQ135 Rs Calculation ===
+// === Get Sensor Resistance (Rs) for MQ135 ===
 float getResistanceMQ135() {
   int val = analogRead(MQ135_PIN);
   float voltage = val * (3.3 / 4095.0);
@@ -192,7 +203,7 @@ float getResistanceMQ135() {
   return Rs;
 }
 
-// === AQI Estimate from CO2 ===
+// === Calculate AQI from CO2 concentration ===
 int calculateAQI(float co2) {
   if (co2 <= 350) return 0;
   else if (co2 <= 600) return 50;
@@ -202,7 +213,7 @@ int calculateAQI(float co2) {
   else return 300;
 }
 
-// === HTML Page for Web Server ===
+// === Generate HTML for Web Interface ===
 String generateHTML() {
   float temperature = dht.readTemperature();
   float humidity = dht.readHumidity();
@@ -214,6 +225,7 @@ String generateHTML() {
   float alcohol_ppm = pow(10, (-1.552 * log10(ratio) + 2.041));
 
   float pressure = bmp.readPressure() / 100.0F;
+  float altitude = 44330 * (1.0 - pow(pressure / 1013.25, 0.1903));
   float bmpTemp = bmp.readTemperature();
   int aqi = calculateAQI(co2_ppm);
 
@@ -223,6 +235,7 @@ String generateHTML() {
                     (aqi == 150) ? "Unhealthy" :
                     (aqi == 200) ? "Very Unhealthy" : "Hazardous";
 
+  // === HTML Content ===
   String html = "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'>";
   html += "<meta http-equiv='refresh' content='5' />";
   html += "<style>body{font-family:Arial; text-align:center;} h2{color:#0A75AD;} .data{font-size:1.5em;}</style>";
@@ -231,11 +244,13 @@ String generateHTML() {
   html += "<div class='data'>Temp (DHT): " + String(temperature, 1) + " °C<br>";
   html += "Humidity: " + String(humidity, 1) + " %<br>";
   html += "Pressure: " + String(pressure, 1) + " hPa<br>";
+  html += "Altitude: " + String(altitude, 1) + " m<br>";
   html += "Temp (BMP): " + String(bmpTemp, 1) + " °C<br><br>";
   html += "CO2: " + String(co2_ppm, 0) + " ppm<br>";
   html += "NH3: " + String(nh3_ppm, 0) + " ppm<br>";
   html += "Alcohol: " + String(alcohol_ppm, 0) + " ppm<br><br>";
   html += "<strong>AQI: " + String(aqi) + " (" + aqiLabel + ")</strong></div>";
   html += "</body></html>";
+
   return html;
 }
